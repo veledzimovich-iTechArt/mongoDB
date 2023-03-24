@@ -24,15 +24,21 @@
 
 [Replication Configuration Document](#Replication-Configuration-Document)
 
-[Read Write Secondary](#Read-Write-Secondary)
+[Read Not Write Secondary Node](#Read-Not-Write-Secondary-Node)
 
 [Read Preferences](#Read-Preferences)
+
+[Failover and Elections](#Failover-and-Elections)
 
 [Write Concern Levels](#Write-Concern-Levels)
 
 [Read Concern Levels](#Read-Concern-Levels)
 
 [Sharding](#Sharding)
+
+[Setup Shard Cluster](#Setup-Shard-Cluster)
+
+[Shard Keys](#Shard-Keys)
 
 
 ### Install
@@ -70,13 +76,13 @@ rm mongodb-database-tools-macos-x86_64-100.7.0.zip
 ### Options
 ```bash
 mongod --help
-# When auth is specified, all database clients who want to connect to mongod first need to authenticate.
+# All clients who want to connect to mongod first need to authenticate.
 mongod --auth
-# The bind_ip option allows us to specify which IP addresses mongod should bind to. When mongod binds to an IP address, clients from that address are able to connect to mongod.
+# When mongod binds to an IP address, clients from that address are able to connect to mongod.
 mongod --bind_ip 123.123.123.123
 # To bind to multiple addresses and/or hosts, you can specify them in a comma-separated list.
 mongod --bind_ip localhost, 123.123.123.123
-# daemon mode
+# Daemon mode. Logpath required for --fork
 mongod --fork
 # Replication mode with basic security and auth enabled
 mongod --replSet
@@ -100,7 +106,6 @@ sudo chown aliaksandr ~/.mongodb/data/db
 # auth disabled by default
 # run daemon port 27017
 sudo mongod --dbpath ~/.mongodb/data/db --logpath ~/.mongodb/data/log/mongod.log --fork
-# cmd+n
 # The mongo javascript shell connects to localhost and test database by default
 mongosh
 # mongodb://127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+1.8.0
@@ -399,10 +404,10 @@ exit
 
 ### Tools
 ```bash
-# close connection
 mongosh --username root --password root123 --authenticationDatabase admin
 use test
 db.employees.insertOne( { "fn": "Tom", "ln": "Atkins" } )
+exit
 
 # mongostat
 mongostat --port 27017 --username root --password root123 --authenticationDatabase admin
@@ -418,6 +423,9 @@ mongoexport --port 27017 -u root -p root123 --authenticationDatabase admin --db 
 tail employees.json
 # mongoimport
 mongoimport --port 27017 -u root -p root123 --authenticationDatabase admin employees.json --drop
+# mongoimport csv
+mongoimport --db sales --port 27015 -u root -p root123 --authenticationDatabase admin Video_Games.json --drop --type=csv --headerline
+
 # mongofiles
 # bsondump
 # mongotop
@@ -465,14 +473,9 @@ replication:
 ```bash
 touch ~/.mondodb/conf/node1.conf
 # dir for key file
-mkdir -p ~/.mongodb/data/db/node1
-mkdir -p ~/.mongodb/data/log/node1
 mkdir -p ~/.mongodb/pki
 openssl rand -base64 741 > ~/.mongodb/pki/test-keyfile
 chmod 400 ~/.mongodb/pki/test-keyfile
-
-# run node1
-sudo mongod --config ~/.mongodb/conf/node1.conf
 
 cd .mongodb/conf
 cp node1.conf node2.conf
@@ -481,9 +484,11 @@ cp node2.conf node3.conf
 # Edit node2.conf (change paths and port 27012)
 # Edit node3.conf (change paths and port 27013)
 # Use same keyFile
-mkdir ~/.mongodb/data/db/{node2,node3}
-mkdir ~/.mongodb/data/log/{node2,node3}
+mkdir ~/.mongodb/data/db/{node1,node2,node3}
+mkdir ~/.mongodb/data/log/{node1,node2,node3}
 
+# run nodes
+sudo mongod --config ~/.mongodb/conf/node1.conf
 sudo mongod --config ~/.mongodb/conf/node2.conf
 sudo mongod --config ~/.mongodb/conf/node3.conf
 
@@ -491,6 +496,7 @@ sudo mongod --config ~/.mongodb/conf/node3.conf
 # Connect first node
 mongosh --port 27011
 rs.initiate()
+use admin
 db.createUser({
   user: "root",
   pwd: "root123",
@@ -644,7 +650,7 @@ rs.reconfig(cfg)
 ```
 
 
-### Read Write Secondary
+### Read Not Write Secondary Node
 ```bash
 mongosh --host "localhost:27011" -u "root" -p "root123" --authenticationDatabase "admin"
 rs.isMaster()
@@ -707,7 +713,7 @@ db.getMongo().setReadPref("nearest")
 
 ### Failover and Elections
 ```bash
-# Upgrade secondary first srvers
+# Upgrade secondary node first
 # Set new primary
 rs.stepDown()
 
@@ -730,18 +736,20 @@ rs.isMaster()
 ### Write Concern Levels (provides a level of durability)
 - 0: Don't wait for acknowledgement
 - 1: wait for acknowledgement from primary (default)
-- >=2: wait for acknowledgement from primary and one secondary
+- 2 and more: wait for acknowledgement from primary and one secondary
 - "majority": wait for majority acknowledgement ceil(Replica Sets / 2) (by default j: true)
 
 wtimeout: <int> the time to wait for the requested write before failed
 
 j: <true/false> - requires the node to commit the write operation to the journal before returning an acknowledgement
 
+
 ### Read Concern Levels
 - local: fast and latest data for primary
 - available (sharded clusters): fast data from secondary
 - "majority": safe and fast
 - linearizable-majority: safe and latest (single document, slow)
+
 
 ### Sharding
 - Horizontal scaling
@@ -765,10 +773,8 @@ j: <true/false> - requires the node to commit the write operation to the journal
 - Shard merges (if data spread across shards)
 
 
-#### Setup Shard Cluster
-
-Run Replica Set node1 node2
-
+### Setup Shard Cluster
+Run Replica Set node1 node2 node3 node4
 ```yaml
 sharding:
   clusterRole: configsvr
@@ -790,20 +796,20 @@ replication:
 ```
 ```bash
 touch ~/.mongodb/conf/csrs1.conf
-mkdir -p ~/.mongodb/data/db/csrs1
-mkdir -p ~/.mongodb/data/log/csrs1
 # Create csrs2.conf change paths and set port 26002
 cp ~/.mongodb/conf/csrs1.conf ~/.mongodb/conf/csrs2.conf
 # Create csrs3.conf change paths and set port 26003
 cp ~/.mongodb/conf/csrs1.conf ~/.mongodb/conf/csrs3.conf
-mkdir ~/.mongodb/data/db/{csrs2,csrs3}
-mkdir ~/.mongodb/data/log/{csrs2, csrs3}
+# Create dirs
+mkdir ~/.mongodb/data/db/{csrs1,csrs2,csrs3}
+mkdir ~/.mongodb/data/log/{csrs1,csrs2,csrs3}
 # run
 sudo mongod --config ~/.mongodb/conf/csrs1.conf
 sudo mongod --config ~/.mongodb/conf/csrs2.conf
 sudo mongod --config ~/.mongodb/conf/csrs3.conf
 
 mongosh --port 26001
+use admin
 rs.initiate()
 # create admin
 db.createUser({
@@ -812,6 +818,7 @@ db.createUser({
   roles : [ {role: "root", db: "admin"} ]
 })
 db.auth("root", "root123")
+rs.status()
 rs.add("localhost:26002")
 rs.add("localhost:26003")
 rs.isMaster()
@@ -835,20 +842,21 @@ processManagement:
 ```
 ```bash
 touch ~/.mongodb/conf/mongos.conf
-# we use data from Replica Set
-# log saved in ~/.mongodb/data/log/mongos.log
+# Use data from Replica Set
+# Log saved in ~/.mongodb/data/log/mongos.log
 # run
 sudo mongos --config ~/.mongodb/conf/mongos.conf
 # inherit users
 mongosh --port 26000 --username root --password root123 --authenticationDatabase admin
 # check status
 sh.status()
+show databases
 ```
 
 #### Setup Sharding
-Update node1.conf, node2.conf, node3.conf
+Update node1.conf, node2.conf, node3.conf, node4.conf
 ```yaml
-# for shrading
+# sharding comment to run without sharding
 sharding:
   clusterRole: shardsvr
 ```
@@ -872,54 +880,120 @@ sudo mongod --config ~/.mongodb/conf/node3.conf
 
 # shutdown node1 (primary)
 mongosh --host "localhost:27011" -u "root" -p "root123" --authenticationDatabase "admin"
+# remove all databases
+use rw
+db.dropDatabase()
+use replica
+db.dropDatabase()
 rs.stepDown()
 # wait for election
 use admin
+
 db.shutdownServer()
 exit
 # restart node1
 sudo mongod --config ~/.mongodb/conf/node1.conf
 
+# now 27012 is primary
+# Import Video_Games.csv
+mongoimport --db sales --port 27012 -u root -p root123 --authenticationDatabase admin Video_Games.csv --drop --type=csv --headerline
+
 # back to mongos
 mongosh --port 26000 --username root --password root123 --authenticationDatabase admin
 sh.addShard("test-example/localhost:27012")
 sh.status()
+show databases
 ```
 
-### Config DB
-Never write data to Config DB
+#### Add Second Shard
 
 ```bash
-use config
-show collections
-db.databases.find().pretty()
-# partitioned: false
-db.collections.find().pretty()
+# Create Replica Set
+# create node5, node6, node7
+cd ~/.mongodb/conf
+cp node1.conf node5.conf
+# replSetName: shard-example
+# Edit node5.conf (replSetName: shard-example, change path and port)
 
-db.shards.find().pretty()
-db.chunks.find().pretty()
+cp node5.conf node6.conf
+cp node5.conf node8.conf
+# Edit node6.conf, node8.conf(change path and port)
 
-db.mongos.find().pretty()
-
+# Use same keyFile
+mkdir ~/.mongodb/data/db/{node5,node6,node8}
+mkdir ~/.mongodb/data/log/{node5,node6,node8}
 ```
+
+```bash
+# run nodes
+sudo mongod --config ~/.mongodb/conf/node5.conf
+sudo mongod --config ~/.mongodb/conf/node6.conf
+sudo mongod --config ~/.mongodb/conf/node8.conf
+
+# Enable communication
+# Connect first node
+mongosh --port 27015
+use admin
+rs.initiate()
+db.createUser({
+  user: "root",
+  pwd: "root123",
+  roles : [ {role: "root", db: "admin"} ]
+})
+
+# current primary 27015
+mongosh --host "localhost:27015" -u "root" -p "root123" --authenticationDatabase "admin"
+# heartbeatIntervalMillis: Long("2000"),
+rs.status()
+
+rs.add("localhost:27016")
+rs.add("localhost:27018")
+
+# back to mongos
+mongosh --port 26000 --username root --password root123 --authenticationDatabase admin
+sh.addShard("shard-example/localhost:27015")
+sh.status()
+show databases
+
+db.adminCommand( { listShards: 1 } )
+
+# remove shard
+# db.adminCommand( { removeShard: "test-example" } )
+# db.adminCommand( { listShards: 1 } )
+# removeShard lists any databases that you need to move in the dbsToMove field in the command output.
+# db.adminCommand( { removeShard: "test-example" } )
+# db.adminCommand( { movePrimary: "sales", to: "shard-example" })
+```
+
 
 ### Shard Keys
 Data distribution in a shared cluster
-- index field in collection
-- immutable _id
-- mutable refineCollectionShardKey
-- permanent
 
 ``` bash
-sh.enableSharding("replica")
-db.messages.findOne()
-db.messages.createIndex( { "author": 1 } )
-sh.shardCollection( "replica.messages", { "author": 1 } )
-# shardKey: { author: 1 },
+mongosh --port 26000 --username root --password root123 --authenticationDatabase admin
+use sales
+sh.enableSharding("sales")
+db.Video_Games.findOne()
+db.Video_Games.createIndex(
+  {
+    "Name": 1, "Platform": 1, "Year_of_Release": 1, "Genre": 1,
+    "Publisher": 1
+  }
+)
+sh.shardCollection( "sales.Video_Games", { "Name": 1, "Platform": 1, "Year_of_Release": 1, "Genre": 1,
+    "Publisher": 1 }
+)
+# shardKey:shardKey: {
+        #   Name: 1,
+        #   Platform: 1,
+        #   Year_of_Release: 1,
+        #   Genre: 1,
+        #   Publisher: 1
+        # },
 # chunkMetadata: [ { shard: 'test-example', nChunks: 1 } ],
 
-db.products.createIndex({ "msg" : 1})
-sh.reshardCollection("replica.messages", { "msg": 1 })
+db.Video_Games.createIndex({ "Name" : 1})
+sh.reshardCollection("sales.Video_Games", { "Name": 1 })
 ```
 
 #### Good Shard Key
@@ -939,54 +1013,46 @@ Use hashing function for monotonic shard keys
 - No geographical workloads
 - No support array
 ```bash
-sh.enableSharding("replica")
+sh.enableSharding("Video_Games")
 # not-array field
-db.messages.createIndex( { "date": "hashed" } )
-sh.shardCollection( "replica.messages", { "date": "hashed" } )
+db.messages.createIndex( { "Year_of_Release": "hashed" } )
+sh.shardCollection( "sales.Video_Games", { "Year_of_Release": "hashed" } )
 ```
 
 #### Chunks
-
-Mapping chunks in shards
-
+Never write data to config DB!
 ```bash
 show dbs
 use config
 show collections
 db.chunks.findOne()
-# min max bounds
+db.databases.find().pretty()
+db.collections.find().pretty()
+db.shards.find().pretty()
+db.chunks.find().pretty()
+db.mongos.find().pretty()
 
-db.getSiblingDB("config").chunks.find(
-  { $expr: { $and: [
-    { $gte: [21572585, "$min.sku"] },
-    { $lt: [21572585, "$max.sku"] }
-  ] } } )
 ```
-
-Different values of Shard Key is our Key Space
-
-All documents from the same chunk live in the same shard
-1 chunk 1 shard
-
-ChunkSuze = 64 MB (default)
+- Different values of Shard Key is our Key Space
+- All documents from the same chunk live in the same shard
+- ChunkSuze = 64 MB (default)
 ```bash
 # change settings
 db.settings.updateOne(
    { _id: "chunksize" },
-   { $set: { _id: "chunksize", value: 2 } },
+   { $set: { _id: "chunksize", value: 1 } },
    { upsert: true }
 )
-# still same
 sh.status()
-use replica
-for ( i=100; i < 200; i++) { db.messages.insertOne(
-    { 'msg': 'not yet', 'author': 'unknown', _id: i }
-  )
-}
+# min max bounds
+db.getSiblingDB("config").chunks.find(
+  { $expr: { $and: [
+    { $gte: ['IL-2 Sturmovik: Cliffs of Dover', "$min.Name"] },
+    { $lt: ['Devil May Cry 4', "$max.Name"] }
+  ] } } )
 ```
 
 Jumbo Chunks(same Shard Key) > greater than ChunkSize
-
 
 #### Balancing
 - Run on Primary member of Config Server Replica Set
@@ -1009,7 +1075,7 @@ sh.setBalancerState(true)
 - limit() for each shard in cluster and re-applies the limit to the merged set of results
 - skip() performs the skip against the merged set of results
 
-Targeted Query contains ShardKey
+Targeted Query contains ShardKey (in any order, Query Planner reorder)
 - Opens cursor against query predicat
 - Fast
 
